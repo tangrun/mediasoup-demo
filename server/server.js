@@ -53,6 +53,12 @@ const mediasoupWorkers = [];
 // @type {Number}
 let nextMediasoupWorkerIdx = 0;
 
+process.on('unhandledRejection', (reason, p) =>
+{
+	logger.info('Unhandled Rejection at: Promise', p, 'reason:', reason);
+	// application specific logging, throwing an error, or other logic here
+});
+
 run();
 
 async function run()
@@ -82,6 +88,11 @@ async function run()
 		for (const room of rooms.values())
 		{
 			room.logStatus();
+
+			if (room.getPeerSize() === 0 && room.getTransportSize() === 0)
+			{
+				room.close();
+			}
 		}
 	}, 120000);
 }
@@ -136,284 +147,177 @@ async function createExpressApp()
 
 	expressApp.use(bodyParser.json());
 
-	/**
-	 * For every API request, verify that the roomId in the path matches and
-	 * existing room.
-	 */
-	expressApp.param(
-		'roomId', (req, res, next, roomId) =>
-		{
-			// The room must exist for all API requests.
-			if (!rooms.has(roomId))
-			{
-				const error = new Error(`room with id "${roomId}" not found`);
+	expressApp.use(function(err, req, res, next) 
+	{
+		logger.debug('request: query: %s', req.query);
+		next();
+	});
 
-				error.status = 404;
-				throw error;
-			}
-
-			req.room = rooms.get(roomId);
-
-			next();
-		});
-
-	/**
-	 * API GET resource that returns the mediasoup Router RTP capabilities of
-	 * the room.
-	 */
 	expressApp.get(
-		'/rooms/:roomId', (req, res) =>
+		'/createRoom', async (req, res) =>
 		{
-			const data = req.room.getRouterRtpCapabilities();
+			const roomId = getUuid();
 
-			res.status(200).json(data);
-		});
+			let room = rooms.get(roomId);
 
-	/**
-	 * POST API to create a Broadcaster.
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters', async (req, res, next) =>
-		{
-			const {
-				id,
-				displayName,
-				device,
-				rtpCapabilities
-			} = req.body;
-
-			try
+			if (room)
 			{
-				const data = await req.room.createBroadcaster(
-					{
-						id,
-						displayName,
-						device,
-						rtpCapabilities
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-
-	/**
-	 * DELETE API to delete a Broadcaster.
-	 */
-	expressApp.delete(
-		'/rooms/:roomId/broadcasters/:broadcasterId', (req, res) =>
-		{
-			const { broadcasterId } = req.params;
-
-			req.room.deleteBroadcaster({ broadcasterId });
-
-			res.status(200).send('broadcaster deleted');
-		});
-
-	/**
-	 * POST API to create a mediasoup Transport associated to a Broadcaster.
-	 * It can be a PlainTransport or a WebRtcTransport depending on the
-	 * type parameters in the body. There are also additional parameters for
-	 * PlainTransport.
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters/:broadcasterId/transports',
-		async (req, res, next) =>
-		{
-			const { broadcasterId } = req.params;
-			const { type, rtcpMux, comedia, sctpCapabilities } = req.body;
-
-			try
-			{
-				const data = await req.room.createBroadcasterTransport(
-					{
-						broadcasterId,
-						type,
-						rtcpMux,
-						comedia, 
-						sctpCapabilities
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-
-	/**
-	 * POST API to connect a Transport belonging to a Broadcaster. Not needed
-	 * for PlainTransport if it was created with comedia option set to true.
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters/:broadcasterId/transports/:transportId/connect',
-		async (req, res, next) =>
-		{
-			const { broadcasterId, transportId } = req.params;
-			const { dtlsParameters } = req.body;
-
-			try
-			{
-				const data = await req.room.connectBroadcasterTransport(
-					{
-						broadcasterId,
-						transportId,
-						dtlsParameters
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-
-	/**
-	 * POST API to create a mediasoup Producer associated to a Broadcaster.
-	 * The exact Transport in which the Producer must be created is signaled in
-	 * the URL path. Body parameters include kind and rtpParameters of the
-	 * Producer.
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters/:broadcasterId/transports/:transportId/producers',
-		async (req, res, next) =>
-		{
-			const { broadcasterId, transportId } = req.params;
-			const { kind, rtpParameters } = req.body;
-
-			try
-			{
-				const data = await req.room.createBroadcasterProducer(
-					{
-						broadcasterId,
-						transportId,
-						kind,
-						rtpParameters
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-
-	/**
-	 * POST API to create a mediasoup Consumer associated to a Broadcaster.
-	 * The exact Transport in which the Consumer must be created is signaled in
-	 * the URL path. Query parameters must include the desired producerId to
-	 * consume.
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters/:broadcasterId/transports/:transportId/consume',
-		async (req, res, next) =>
-		{
-			const { broadcasterId, transportId } = req.params;
-			const { producerId } = req.query;
-
-			try
-			{
-				const data = await req.room.createBroadcasterConsumer(
-					{
-						broadcasterId,
-						transportId,
-						producerId
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-
-	/**
-	 * POST API to create a mediasoup DataConsumer associated to a Broadcaster.
-	 * The exact Transport in which the DataConsumer must be created is signaled in
-	 * the URL path. Query body must include the desired producerId to
-	 * consume.
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters/:broadcasterId/transports/:transportId/consume/data',
-		async (req, res, next) =>
-		{
-			const { broadcasterId, transportId } = req.params;
-			const { dataProducerId } = req.body;
-
-			try
-			{
-				const data = await req.room.createBroadcasterDataConsumer(
-					{
-						broadcasterId,
-						transportId,
-						dataProducerId
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-	
-	/**
-	 * POST API to create a mediasoup DataProducer associated to a Broadcaster.
-	 * The exact Transport in which the DataProducer must be created is signaled in
-	 */
-	expressApp.post(
-		'/rooms/:roomId/broadcasters/:broadcasterId/transports/:transportId/produce/data',
-		async (req, res, next) =>
-		{
-			const { broadcasterId, transportId } = req.params;
-			const { label, protocol, sctpStreamParameters, appData } = req.body;
-
-			try
-			{
-				const data = await req.room.createBroadcasterDataProducer(
-					{
-						broadcasterId,
-						transportId,
-						label,
-						protocol,
-						sctpStreamParameters,
-						appData
-					});
-
-				res.status(200).json(data);
-			}
-			catch (error)
-			{
-				next(error);
-			}
-		});
-
-	/**
-	 * Error handler.
-	 */
-	expressApp.use(
-		(error, req, res, next) =>
-		{
-			if (error)
-			{
-				logger.warn('Express app %s', String(error));
-
-				error.status = error.status || (error.name === 'TypeError' ? 400 : 500);
-
-				res.statusMessage = error.message;
-				res.status(error.status).send(String(error));
+				res.json({
+					code : 1,
+					msg  : '房间已存在'
+				});
 			}
 			else
 			{
-				next();
+				room = await createRoom(roomId);
+				res.json({
+					code	: 0,
+					msg		: 'success',
+					data	: {
+						room      	: room,
+						roomId,
+						serverIp  	: config.https.listenIp,
+						serverPort	: config.https.listenPort
+					}
+				});
 			}
+		});
+
+	expressApp.get(
+		'/busy', (req, res) =>
+		{
+			const { roomId, peerId } = req.query;
+
+			if (!roomId)
+			{
+				res.json({
+					code : 1,
+					msg  : '房间ID为空'
+				});
+
+				return;
+			}
+			if (!peerId)
+			{
+				res.json({
+					code : 1,
+					msg  : 'PeerID为空'
+				});
+
+				return;
+			}
+
+			const room = rooms.get(roomId);
+
+			if (!room)
+			{
+				res.json({
+					code : 1,
+					msg  : '房间不存在'
+				});
+				
+				return;
+			}
+			room.busy(peerId);
+
+			res.json({
+				code : 0,
+				msg  : 'success',
+				data : room
+			});
+		});
+
+	expressApp.get(
+		'/roomExists', (req, res) =>
+		{
+			const { roomId } = req.query;
+
+			if (!roomId)
+			{
+				res.json({
+					code : 1,
+					msg  : '房间ID为空'
+				});
+
+				return;
+			}
+
+			const room = rooms.get(roomId);
+
+			if (!room)
+			{
+				res.json({
+					code : 1,
+					msg  : '房间不存在',
+					data : room
+				});
+			}
+
+			res.json({
+				code : 0,
+				msg  : 'success',
+				data : room
+			});
+
+		});
+
+	expressApp.get(
+		'/debug_createRoom', async (req, res) =>
+		{
+
+			const { roomId } = req.query;
+
+			if (!roomId)
+			{
+				res.json({
+					code : 1,
+					msg  : '房间ID为空'
+				});
+
+				return;
+			}
+
+			let room = rooms.get(roomId);
+
+			if (room)
+			{
+				res.json({
+					code : 1,
+					msg  : '房间已存在',
+					room : room
+				});
+			}
+			else
+			{
+				room = await createRoom(roomId);
+
+				logger.debug('debug createRoom %s', room);
+
+				res.json({
+					code : 0,
+					msg  : 'success',
+					data : room
+				});
+			}
+		});
+
+	expressApp.get(
+		'/debug_roomList', (req, res) =>
+		{
+			logger.info('debug_roomList size:%s', rooms.size);
+
+			const roomList = [];
+
+			for (const value of rooms.values())
+			{
+				roomList.push(value);
+			}
+
+			res.json({
+				code : 0,
+				msg  : 'success',
+				data : roomList
+			});
 		});
 }
 
@@ -427,10 +331,10 @@ async function runHttpsServer()
 
 	// HTTPS server for the protoo WebSocket server.
 	const tls =
-	{
-		cert : fs.readFileSync(config.https.tls.cert),
-		key  : fs.readFileSync(config.https.tls.key)
-	};
+		{
+			cert : fs.readFileSync(config.https.tls.cert),
+			key  : fs.readFileSync(config.https.tls.key)
+		};
 
 	httpsServer = https.createServer(tls, expressApp);
 
@@ -481,7 +385,14 @@ async function runProtooWebSocketServer()
 		// roomId.
 		queue.push(async () =>
 		{
-			const room = await getOrCreateRoom({ roomId });
+			const room = rooms.get(roomId);
+
+			if (!room)
+			{
+				reject();
+
+				return;
+			}
 
 			// Accept the protoo WebSocket connection.
 			const protooWebSocketTransport = accept();
@@ -510,25 +421,31 @@ function getMediasoupWorker()
 	return worker;
 }
 
-/**
- * Get a Room instance (or create one if it does not exist).
- */
-async function getOrCreateRoom({ roomId })
+async function createRoom(roomId)
 {
-	let room = rooms.get(roomId);
+	logger.info('creating a new Room [roomId:%s]', roomId);
 
-	// If the Room does not exist create a new one.
-	if (!room)
-	{
-		logger.info('creating a new Room [roomId:%s]', roomId);
+	const mediasoupWorker = getMediasoupWorker();
+	const room = await Room.create({ mediasoupWorker, roomId });
 
-		const mediasoupWorker = getMediasoupWorker();
-
-		room = await Room.create({ mediasoupWorker, roomId });
-
-		rooms.set(roomId, room);
-		room.on('close', () => rooms.delete(roomId));
-	}
+	rooms.set(roomId, room);
+	room.on('close', () => rooms.delete(roomId));
 
 	return room;
+}
+
+function getUuid()
+{
+	const s = [];
+	const hexDigits = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+	for (let i = 0; i < 36; i++)
+	{
+		s[i] = hexDigits.substr(Math.floor(Math.random() * 0x10), 1);
+	}
+	s[14] = '4';
+	s[19] = hexDigits.substr((s[19] & 0x3) | 0x8, 1);
+	s[8] = s[13] = s[18] = s[23] = '-';
+
+	return s.join('');
 }
