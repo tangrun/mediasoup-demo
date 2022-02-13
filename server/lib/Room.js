@@ -113,6 +113,32 @@ class Room extends EventEmitter
 		global.bot = this._bot;
 	}
 
+	busy(peerId)
+	{
+		const peer = this._getPeer(peerId);
+
+		for (const otherPeer of this._getPeers({ excludePeer: peer }))
+		{
+			otherPeer.notify(
+				'busy',
+				{
+					peerId : peerId
+				})
+				.catch(() => {});
+		}
+	}
+
+	getTransportSize()
+	{
+		return this._mediasoupRouter._transports && this._mediasoupRouter._transports.size
+			? this._mediasoupRouter._transports.size : 0;
+	}
+
+	getPeerSize()
+	{
+		return this._protooRoom.peers.length;
+	}
+
 	/**
 	 * Closes the Room instance by closing the protoo Room and the mediasoup Router.
 	 */
@@ -145,9 +171,12 @@ class Room extends EventEmitter
 	logStatus()
 	{
 		logger.info(
-			'logStatus() [roomId:%s, protoo Peers:%s]',
+			'logStatus() [roomId:%s, protoo Peers:%s, mediasoup Transports:%s]',
 			this._roomId,
-			this._protooRoom.peers.length);
+			this._protooRoom.peers.length,
+			this._mediasoupRouter._transports && this._mediasoupRouter._transports.size
+				? this._mediasoupRouter._transports.size : 0);
+		// NOTE: Private API.
 	}
 
 	/**
@@ -205,8 +234,8 @@ class Room extends EventEmitter
 		peer.on('request', (request, accept, reject) =>
 		{
 			logger.debug(
-				'protoo Peer "request" event [method:%s, peerId:%s]',
-				request.method, peer.id);
+				'protoo Peer "request" event [method:%s, peerId:%s, data:%s]',
+				request.method, peer.id, request.data);
 
 			this._handleProtooRequest(peer, request, accept, reject)
 				.catch((error) =>
@@ -283,25 +312,25 @@ class Room extends EventEmitter
 			throw new Error(`broadcaster with id "${id}" already exists`);
 
 		const broadcaster =
-		{
-			id,
-			data :
 			{
-				displayName,
-				device :
-				{
-					flag    : 'broadcaster',
-					name    : device.name || 'Unknown device',
-					version : device.version
-				},
-				rtpCapabilities,
-				transports    : new Map(),
-				producers     : new Map(),
-				consumers     : new Map(),
-				dataProducers : new Map(),
-				dataConsumers : new Map()
-			}
-		};
+				id,
+				data :
+					{
+						displayName,
+						device :
+							{
+								flag    : 'broadcaster',
+								name    : device.name || 'Unknown device',
+								version : device.version
+							},
+						rtpCapabilities,
+						transports    : new Map(),
+						producers     : new Map(),
+						consumers     : new Map(),
+						dataProducers : new Map(),
+						dataConsumers : new Map()
+					}
+			};
 
 		// Store the Broadcaster into the map.
 		this._broadcasters.set(broadcaster.id, broadcaster);
@@ -329,12 +358,12 @@ class Room extends EventEmitter
 			for (const joinedPeer of joinedPeers)
 			{
 				const peerInfo =
-				{
-					id          : joinedPeer.id,
-					displayName : joinedPeer.data.displayName,
-					device      : joinedPeer.data.device,
-					producers   : []
-				};
+					{
+						id          : joinedPeer.id,
+						displayName : joinedPeer.data.displayName,
+						device      : joinedPeer.data.device,
+						producers   : []
+					};
 
 				for (const producer of joinedPeer.data.producers.values())
 				{
@@ -423,11 +452,11 @@ class Room extends EventEmitter
 			case 'webrtc':
 			{
 				const webRtcTransportOptions =
-				{
-					...config.mediasoup.webRtcTransportOptions,
-					enableSctp     : Boolean(sctpCapabilities),
-					numSctpStreams : (sctpCapabilities || {}).numStreams
-				};
+					{
+						...config.mediasoup.webRtcTransportOptions,
+						enableSctp     : Boolean(sctpCapabilities),
+						numSctpStreams : (sctpCapabilities || {}).numStreams
+					};
 
 				const transport = await this._mediasoupRouter.createWebRtcTransport(
 					webRtcTransportOptions);
@@ -447,11 +476,11 @@ class Room extends EventEmitter
 			case 'plain':
 			{
 				const plainTransportOptions =
-				{
-					...config.mediasoup.plainTransportOptions,
-					rtcpMux : rtcpMux,
-					comedia : comedia
-				};
+					{
+						...config.mediasoup.plainTransportOptions,
+						rtcpMux : rtcpMux,
+						comedia : comedia
+					};
 
 				const transport = await this._mediasoupRouter.createPlainTransport(
 					plainTransportOptions);
@@ -808,17 +837,16 @@ class Room extends EventEmitter
 	 */
 	async _handleProtooRequest(peer, request, accept, reject)
 	{
+
 		switch (request.method)
 		{
-			case 'getRouterRtpCapabilities':
-			{
+			case 'getRouterRtpCapabilities': {
 				accept(this._mediasoupRouter.rtpCapabilities);
 
 				break;
 			}
 
-			case 'join':
-			{
+			case 'join': {
 				// Ensure the Peer is not already joined.
 				if (peer.data.joined)
 					throw new Error('Peer already joined');
@@ -841,10 +869,10 @@ class Room extends EventEmitter
 				// And also create Consumers for existing Producers.
 
 				const joinedPeers =
-				[
-					...this._getJoinedPeers(),
-					...this._broadcasters.values()
-				];
+					[
+						...this._getJoinedPeers(),
+						...this._broadcasters.values()
+					];
 
 				// Reply now the request with the list of joined peers (all but the new one).
 				const peerInfos = joinedPeers
@@ -912,6 +940,38 @@ class Room extends EventEmitter
 				break;
 			}
 
+			case 'leaveRoom': {
+				if (!peer.data.joined)
+					throw new Error('Peer not yet joined');
+				for (const otherPeer of this._getPeers({ excludePeer: peer }))
+				{
+					otherPeer.notify(
+						'leaveRoom',
+						{
+							peerId : peer.id
+						})
+						.catch(() => {});
+				}
+
+				accept();
+				break;
+			}
+
+			case 'inviteReject': {
+				for (const otherPeer of this._getJoinedPeers({ excludePeer: peer }))
+				{
+					otherPeer.notify(
+						'inviteReject',
+						{
+							peerId : peer.id
+						})
+						.catch(() => {});
+				}
+
+				accept();
+				break;
+			}
+
 			case 'createWebRtcTransport':
 			{
 				// NOTE: Don't require that the Peer is joined here, so the client can
@@ -925,12 +985,12 @@ class Room extends EventEmitter
 				} = request.data;
 
 				const webRtcTransportOptions =
-				{
-					...config.mediasoup.webRtcTransportOptions,
-					enableSctp     : Boolean(sctpCapabilities),
-					numSctpStreams : (sctpCapabilities || {}).numStreams,
-					appData        : { producing, consuming }
-				};
+					{
+						...config.mediasoup.webRtcTransportOptions,
+						enableSctp     : Boolean(sctpCapabilities),
+						numSctpStreams : (sctpCapabilities || {}).numStreams,
+						appData        : { producing, consuming }
+					};
 
 				if (forceTcp)
 				{
@@ -1132,8 +1192,7 @@ class Room extends EventEmitter
 				break;
 			}
 
-			case 'pauseProducer':
-			{
+			case 'pauseProducer': {
 				// Ensure the Peer is joined.
 				if (!peer.data.joined)
 					throw new Error('Peer not yet joined');
@@ -1151,8 +1210,7 @@ class Room extends EventEmitter
 				break;
 			}
 
-			case 'resumeProducer':
-			{
+			case 'resumeProducer': {
 				// Ensure the Peer is joined.
 				if (!peer.data.joined)
 					throw new Error('Peer not yet joined');
@@ -1170,8 +1228,7 @@ class Room extends EventEmitter
 				break;
 			}
 
-			case 'pauseConsumer':
-			{
+			case 'pauseConsumer': {
 				// Ensure the Peer is joined.
 				if (!peer.data.joined)
 					throw new Error('Peer not yet joined');
@@ -1189,8 +1246,7 @@ class Room extends EventEmitter
 				break;
 			}
 
-			case 'resumeConsumer':
-			{
+			case 'resumeConsumer': {
 				// Ensure the Peer is joined.
 				if (!peer.data.joined)
 					throw new Error('Peer not yet joined');
@@ -1208,8 +1264,7 @@ class Room extends EventEmitter
 				break;
 			}
 
-			case 'setConsumerPreferredLayers':
-			{
+			case 'setConsumerPreferredLayers': {
 				// Ensure the Peer is joined.
 				if (!peer.data.joined)
 					throw new Error('Peer not yet joined');
@@ -1524,6 +1579,23 @@ class Room extends EventEmitter
 	{
 		return this._protooRoom.peers
 			.filter((peer) => peer.data.joined && peer !== excludePeer);
+	}
+
+	_getPeers({ excludePeer = undefined } = {})
+	{
+		return this._protooRoom.peers
+			.filter((peer) => peer !== excludePeer);
+	}
+
+	_getPeer(peerId)
+	{
+		for (const peer of this._protooRoom.peers)
+		{
+			if (peer.data.id === peerId)
+			{
+				return peer;
+			}
+		}
 	}
 
 	/**

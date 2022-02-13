@@ -8,7 +8,8 @@
   "main": "lib/index.js",
   "scripts": {
     "lint": "eslint -c .eslintrc.js server.js lib connect.js",
-    "start": "DEBUG=${DEBUG:='*mediasoup* *INFO* *WARN* *ERROR*'} INTERACTIVE=${INTERACTIVE:='true'} node server.js",
+    "idea_run_env": "MEDIASOUP_ANNOUNCED_IP=192.168.0.218;DEBUG=mediasoup-demo-server*;INTERACTIVE=false",
+    "start": "node server.js",
     "connect": "node connect.js"
   },
   "dependencies": {
