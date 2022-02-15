@@ -368,6 +368,8 @@ async function runProtooWebSocketServer()
 		const u = url.parse(info.request.url, true);
 		const roomId = u.query['roomId'];
 		const peerId = u.query['peerId'];
+		const displayName = u.query['displayName'];
+		const avatar = u.query['avatar'];
 
 		if (!roomId || !peerId)
 		{
@@ -397,7 +399,7 @@ async function runProtooWebSocketServer()
 			// Accept the protoo WebSocket connection.
 			const protooWebSocketTransport = accept();
 
-			room.handleProtooConnection({ peerId, protooWebSocketTransport });
+			room.handleProtooConnection(peerId, displayName, avatar, null, protooWebSocketTransport);
 		})
 			.catch((error) =>
 			{
