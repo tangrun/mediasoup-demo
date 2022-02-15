@@ -132,7 +132,7 @@ async function runMediasoupWorkers()
 			const usage = await worker.getResourceUsage();
 
 			logger.info('mediasoup Worker resource usage [pid:%d]: %o', worker.pid, usage);
-		}, 120000);
+		}, 600000);
 	}
 }
 
@@ -310,7 +310,9 @@ async function createExpressApp()
 
 			for (const value of rooms.values())
 			{
-				roomList.push(value);
+				roomList.push({
+
+				});
 			}
 
 			res.json({
@@ -391,7 +393,7 @@ async function runProtooWebSocketServer()
 
 			if (!room)
 			{
-				reject();
+				reject(400,"房间不存在");
 
 				return;
 			}

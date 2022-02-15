@@ -266,11 +266,6 @@ class Room extends EventEmitter
 	/**
 	 * Called from server.js upon a protoo WebSocket connection request from a
 	 * browser.
-	 *
-	 * @param {String} peerId - The id of the protoo peer to be created.
-	 * @param {Boolean} consume - Whether this peer wants to consume from others.
-	 * @param {protoo.Transport} protooWebSocketTransport - The associated
-	 *   protoo WebSocket transport.
 	 */
 	handleProtooConnection({
 		peerId, displayName, avatar, consume,
@@ -358,13 +353,13 @@ class Room extends EventEmitter
 			logger.debug('protoo Peer "close" event [peerId:%s]', peer.id);
 
 			// If the Peer was joined, notify all Peers.
-			if (peer.vPeer.connectState !== ConnectionState.Online)
+			if (peer.data.vPeer.connectState === ConnectionState.Online)
 			{
-				// 非主动离开就视为网络断开 还有一种就是hangup
-				peer.vPeer.connectState = ConnectionState.Offline;
+				// 非主动离开(left 为主动离开 hangup方法) 就视为网络断开
+				peer.data.vPeer.connectState = ConnectionState.Offline;
 				this.sendNotify('peerUpdate', this._getOnlinePeers(peer), {
 					peerId   : peer.id,
-					peerInfo : peer.vPeer
+					peerInfo : peer.data.vPeer
 				});
 			}
 			// 取消 peerClosed
@@ -1011,8 +1006,6 @@ class Room extends EventEmitter
 					throw new Error('Peer already joined');
 
 				const {
-					displayName,
-					avatar,
 					device,
 					rtpCapabilities,
 					sctpCapabilities
@@ -1021,32 +1014,16 @@ class Room extends EventEmitter
 				// Store client data into the protoo Peer data object.
 				peer.data.joined = true;
 				peer.data.vPeer.conversationState = ConversationState.InCall;
-				peer.data.displayName = displayName;
-				peer.data.avatar = avatar;
-				peer.data.device = device;
+				peer.data.vPeer.device = device;
 				peer.data.rtpCapabilities = rtpCapabilities;
 				peer.data.sctpCapabilities = sctpCapabilities;
 
 				// Tell the new Peer about already joined Peers.
 				// And also create Consumers for existing Producers.
 
-				const joinedPeers =
-					[
-						...this._getActivePeers(),
-						...this._broadcasters.values()
-					];
+				const peers =this._getActiveVPeers(peer.id);
 
-				// Reply now the request with the list of joined peers (all but the new one).
-				const peerInfos = joinedPeers
-					.filter((joinedPeer) => joinedPeer.id !== peer.id)
-					.map((value) => 
-					{
-						return {
-							...value.data.vPeer
-						};
-					});
-
-				accept({ peers: peerInfos });
+				accept({ peers: peers });
 
 				// Mark the new Peer as joined.
 				peer.data.joined = true;
@@ -1100,22 +1077,22 @@ class Room extends EventEmitter
 				{
 					case ConversationState.Invited:
 					{
-						peer.vPeer.connectState = ConnectionState.LEFT;
-						peer.vPeer.conversationState = ConversationState.InviteReject;
+						peer.data.vPeer.connectState = ConnectionState.LEFT;
+						peer.data.vPeer.conversationState = ConversationState.InviteReject;
 						this.sendNotify('peerUpdate', this._getOnlinePeers(peer), {
 							peerId   : peer.id,
-							peerInfo : peer.vPeer
+							peerInfo : peer.data.vPeer
 						});
 						break;
 					}
 					case ConversationState.InCall:
 					case ConversationState.NEW:// 房主 理应第一个进入的那个人 不是被邀请状态
 					{
-						peer.vPeer.connectState = ConnectionState.LEFT;
-						peer.vPeer.conversationState = ConversationState.Left;
+						peer.data.vPeer.connectState = ConnectionState.LEFT;
+						peer.data.vPeer.conversationState = ConversationState.Left;
 						this.sendNotify('peerUpdate', this._getOnlinePeers(peer), {
 							peerId   : peer.id,
-							peerInfo : peer.vPeer
+							peerInfo : peer.data.vPeer
 						});
 						break;
 					}
@@ -1748,15 +1725,19 @@ class Room extends EventEmitter
 	/**
 	 * 获取在线的人 和 理论在房间的人
 	 */
-	_getActivePeers({ excludePeer = undefined } = {})
+	_getActiveVPeers({ excludePeerId = undefined } = {})
 	{
-		return this._protooRoom.peers.filter((peer) =>
-			(peer.data.vPeer.conversationState === ConversationState.NEW
+		const list = []
+		this._virtualPeers.forEach((value, key) => {
+			if ((peer.data.vPeer.conversationState === ConversationState.NEW
 				|| peer.data.vPeer.conversationState === ConversationState.InCall
 				|| peer.data.vPeer.conversationState === ConversationState.Invited
 				|| peer.data.vPeer.conversationState === ConversationState.Offline
-			)
-			&& peer !== excludePeer);
+			) && excludePeerId!==key){
+				list.push(value);
+			}
+		})
+		return list;
 	}
 
 	_getVirtualPeers(excludePeerId)
