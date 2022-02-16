@@ -87,12 +87,9 @@ async function run()
 	{
 		for (const room of rooms.values())
 		{
-			room.logStatus();
+			// room.logStatus();
 
-			if (room.getPeerSize() === 0 && room.getTransportSize() === 0)
-			{
-				room.close();
-			}
+			room.hasPeersCheck();
 		}
 	}, 120000);
 }
@@ -283,8 +280,7 @@ async function createExpressApp()
 			{
 				res.json({
 					code : 1,
-					msg  : '房间已存在',
-					room : room
+					msg  : '房间已存在'
 				});
 			}
 			else
@@ -295,8 +291,7 @@ async function createExpressApp()
 
 				res.json({
 					code : 0,
-					msg  : 'success',
-					data : room
+					msg  : 'success'
 				});
 			}
 		});
@@ -308,12 +303,13 @@ async function createExpressApp()
 
 			const roomList = [];
 
-			for (const value of rooms.values())
+			rooms.forEach((value, key) =>
 			{
 				roomList.push({
-
+					id    : key,
+					peers : Array.from(value._virtualPeers.values())
 				});
-			}
+			});
 
 			res.json({
 				code : 0,
@@ -393,7 +389,7 @@ async function runProtooWebSocketServer()
 
 			if (!room)
 			{
-				reject(400,"房间不存在");
+				reject(400, '房间不存在');
 
 				return;
 			}
@@ -401,7 +397,10 @@ async function runProtooWebSocketServer()
 			// Accept the protoo WebSocket connection.
 			const protooWebSocketTransport = accept();
 
-			room.handleProtooConnection(peerId, displayName, avatar, null, protooWebSocketTransport);
+			room.handleProtooConnection({ peerId,
+				displayName,
+				avatar, 
+				protooWebSocketTransport });
 		})
 			.catch((error) =>
 			{
