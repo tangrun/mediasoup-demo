@@ -11,7 +11,7 @@ const ConnectionState = {
 	/**
 	 * 初始化
 	 */
-	NEW : 'NEW',
+	New : 'New',
 
 	/**
 	 * socket连接上
@@ -26,14 +26,14 @@ const ConnectionState = {
 	/**
 	 * 主动离开
 	 */
-	LEFT : 'LEFT'
+	Left : 'Left'
 };
 
 const ConversationState = {
 	/**
 	 * 初始化
 	 */
-	NEW : 'NEW',
+	New : 'New',
 
 	/**
 	 * 被邀请中
@@ -112,9 +112,9 @@ class Room extends EventEmitter
 		// Create a mediasoup AudioLevelObserver.
 		const audioLevelObserver = await mediasoupRouter.createAudioLevelObserver(
 			{
-				maxEntries : 1,
+				maxEntries : 999,
 				threshold  : -80,
-				interval   : 800
+				interval   : 1000
 			});
 
 		const bot = await Bot.create({ mediasoupRouter });
@@ -220,7 +220,7 @@ class Room extends EventEmitter
 			}
 			catch (e)
 			{
-				logger.error('sendNotifyError type: %s,peer: %s, params: %s', type, peer.data.id, e);
+				logger.error('sendNotifyError type: %s,peer: %s, params: %s', type, peer.id, e);
 			}
 
 		}
@@ -329,13 +329,13 @@ class Room extends EventEmitter
 				displayName       : displayName,
 				avatar            : avatar,
 				device            : null,
-				connectionState   : ConnectionState.NEW,
-				conversationState : ConversationState.NEW
+				connectionState   : ConnectionState.New,
+				conversationState : ConversationState.New
 			};
 			this._virtualPeers.set(peerId, vPeer);
 		}
 		// 通话中 重连 关闭最初的连接
-		if (vPeer.conversationState === ConversationState.Joined)
+		if (vPeer.connectionState === ConnectionState.Online)
 		{
 			const existingPeer = this._getPeer(peerId);
 
@@ -414,7 +414,7 @@ class Room extends EventEmitter
 				{
 					if (peer.data.vPeer.connectionState === ConnectionState.Offline)
 					{
-						peer.data.vPeer.connectionState = ConnectionState.LEFT;
+						peer.data.vPeer.connectionState = ConnectionState.Left;
 						this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
 							peerId   : peer.id,
 							peerInfo : peer.data.vPeer
@@ -1045,8 +1045,8 @@ class Room extends EventEmitter
 					if (!invitePeer)
 					{
 						invitePeer = {
-							connectionState   : ConnectionState.NEW,
-							conversationState : ConversationState.NEW
+							connectionState   : ConnectionState.New,
+							conversationState : ConversationState.New
 						};
 					}
 
@@ -1082,7 +1082,7 @@ class Room extends EventEmitter
 				});
 
 				this.sendNotify('newPeers', this._getOnlinePeers(), {
-					peers : peers
+					peers : inviteList
 				});
 				break;
 			}
@@ -1173,7 +1173,7 @@ class Room extends EventEmitter
 				{
 					case ConversationState.Invited:
 					{
-						peer.data.vPeer.connectionState = ConnectionState.LEFT;
+						peer.data.vPeer.connectionState = ConnectionState.Left;
 						peer.data.vPeer.conversationState = ConversationState.InviteReject;
 						this._removeTimeOutTask(peer.id, TaskType.InvitationNoResponse);
 						this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
@@ -1183,9 +1183,9 @@ class Room extends EventEmitter
 						break;
 					}
 					case ConversationState.Joined:
-					case ConversationState.NEW:// 房主 理应第一个进入的那个人 不是被邀请状态
+					case ConversationState.New:// 房主 理应第一个进入的那个人 不是被邀请状态
 					{
-						peer.data.vPeer.connectionState = ConnectionState.LEFT;
+						peer.data.vPeer.connectionState = ConnectionState.Left;
 						peer.data.vPeer.conversationState = ConversationState.Left;
 						this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
 							peerId   : peer.id,
@@ -1243,7 +1243,7 @@ class Room extends EventEmitter
 
 				// NOTE: For testing.
 				// await transport.enableTraceEvent([ 'probation', 'bwe' ]);
-				await transport.enableTraceEvent([ 'bwe' ]);
+				//await transport.enableTraceEvent([ 'bwe' ]);
 
 				transport.on('trace', (trace) =>
 				{
@@ -1828,7 +1828,7 @@ class Room extends EventEmitter
 
 		this._virtualPeers.forEach((peer, key) => 
 		{
-			if ((peer.conversationState === ConversationState.NEW
+			if ((peer.conversationState === ConversationState.New
 				|| peer.conversationState === ConversationState.Joined
 				|| peer.conversationState === ConversationState.Invited
 				|| peer.conversationState === ConversationState.Offline
@@ -1864,7 +1864,7 @@ class Room extends EventEmitter
 	{
 		for (const peer of this._protooRoom.peers)
 		{
-			if (peer.data.id === peerId)
+			if (peer.id === peerId)
 			{
 				return peer;
 			}
