@@ -334,36 +334,34 @@ class Room extends EventEmitter
 			};
 			this._virtualPeers.set(peerId, vPeer);
 		}
-		// 通话中 重连 关闭最初的连接
-		if (vPeer.connectionState === ConnectionState.Online)
-		{
-			const existingPeer = this._getPeer(peerId);
+		
+		let peer;
 
-			if (existingPeer)
-			{
-				logger.warn('handleProtooConnection() | there is already a protoo Peer with same peerId, closing it [peerId:%s]', peerId);
-
-				existingPeer.close();
-			}
-		}
-		// 短线重连 移除掉线超时任务
 		if (vPeer.connectionState === ConnectionState.Offline)
 		{
+			// 短线重连 移除掉线超时任务
 			this._removeTimeOutTask(vPeer.id, TaskType.OfflineReconnected);
+		}
+		else if (vPeer.connectionState === ConnectionState.Online)
+		{
+			// 客户端闪退的话 会及时收到close的 网络中断则不会收到 短时间重新连接上来状态还是online
+			peer = this._getPeer(peerId);
 		}
 
 		vPeer.connectionState = ConnectionState.Online;
 
-		let peer;
-
 		// Create a new protoo Peer with the given peerId.
-		try
+		if (!peer)
 		{
-			peer = this._protooRoom.createPeer(peerId, protooWebSocketTransport);
-		}
-		catch (error)
-		{
-			logger.error('protooRoom.createPeer() failed:%o', error);
+			try
+			{
+				peer = this._protooRoom.createPeer(peerId, protooWebSocketTransport);
+			}
+			catch (error)
+			{
+				logger.error('protooRoom.createPeer() failed:%o', error);
+				throw error;
+			}
 		}
 
 		// Use the peer.data object to store mediasoup related objects.
@@ -1243,7 +1241,7 @@ class Room extends EventEmitter
 
 				// NOTE: For testing.
 				// await transport.enableTraceEvent([ 'probation', 'bwe' ]);
-				//await transport.enableTraceEvent([ 'bwe' ]);
+				// await transport.enableTraceEvent([ 'bwe' ]);
 
 				transport.on('trace', (trace) =>
 				{

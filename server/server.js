@@ -368,17 +368,14 @@ async function runProtooWebSocketServer()
 		const peerId = u.query['peerId'];
 		const displayName = u.query['displayName'];
 		const avatar = u.query['avatar'];
-
+		
+		logger.debug('protoo connection request, address:%s, origin:%s , %s', info.socket.remoteAddress, info.origin, u.query);
 		if (!roomId || !peerId)
 		{
 			reject(400, 'Connection request without roomId and/or peerId');
 
 			return;
 		}
-
-		logger.info(
-			'protoo connection request [roomId:%s, peerId:%s, address:%s, origin:%s]',
-			roomId, peerId, info.socket.remoteAddress, info.origin);
 
 		// Serialize this code into the queue to avoid that two peers connecting at
 		// the same time with the same roomId create two separate rooms with same
@@ -395,7 +392,7 @@ async function runProtooWebSocketServer()
 			}
 
 			// Accept the protoo WebSocket connection.
-			const protooWebSocketTransport = accept();
+			const protooWebSocketTransport = accept(room._getActiveVPeers());
 
 			room.handleProtooConnection({ peerId,
 				displayName,
