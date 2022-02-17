@@ -113,8 +113,8 @@ class Room extends EventEmitter
 		const audioLevelObserver = await mediasoupRouter.createAudioLevelObserver(
 			{
 				maxEntries : 999,
-				threshold  : -80,
-				interval   : 1000
+				threshold  : -127,
+				interval   : 2000
 			});
 
 		const bot = await Bot.create({ mediasoupRouter });
@@ -978,6 +978,22 @@ class Room extends EventEmitter
 	{
 		this._audioLevelObserver.on('volumes', (volumes) =>
 		{
+			const list = []
+			volumes.forEach((value)=>{
+				if (!value.producer.talking){
+					value.producer.talking = false
+				}
+				const onVoice = value.volume > -60;
+				console.log(value.producer.appData.peerId,value.producer.talking , onVoice)
+				if (value.producer.talking !== onVoice){
+					value.producer.talking = onVoice;
+					list.push({
+						peerId : value.producer.appData.peerId,
+						talking : onVoice
+					})
+				}
+			})
+			console.log(list)
 			const { producer, volume } = volumes[0];
 
 			// logger.debug(
@@ -1001,7 +1017,7 @@ class Room extends EventEmitter
 
 		this._audioLevelObserver.on('silence', () =>
 		{
-			// logger.debug('audioLevelObserver "silence" event');
+			logger.debug('audioLevelObserver "silence" event');
 
 			// Notify all Peers.
 			for (const peer of this._getJoinedPeers())
