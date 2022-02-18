@@ -1,11 +1,29 @@
+const EnhancedEventEmitter = require('protoo-server/lib/EnhancedEventEmitter');
+
+class Aaaa extends EnhancedEventEmitter
+{
+	
+	test()
+	{
+		console.log('sssssssssss');
+
+		this.safeEmit('close');
+	}
+}
+
 function main()
 {
-	const a = {};
+	const aaaa = new Aaaa();
 
-	a.aa = 11;
-	a.a2 ={};
-	a.a2.dd = 122;
-	console.log(a);
+	aaaa.on('close', () => 
+	{
+		console.log('dddddddddddvvvvvvvvvvvvvvvvvv');
+	});
+	
+	console.log('ccccccccccc');
+	
+	aaaa.test();
+	console.log('111111111111111111');
 }
 
 main();

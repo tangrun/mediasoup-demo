@@ -68,11 +68,11 @@ const ConversationState = {
 
 const TaskType = {
 	InvitationNoResponse : {
-		time : 90*1000,
+		time : 30 * 1000,
 		key  : 'InvitationNoResponse'
 	},
 	OfflineReconnected : {
-		time : 90*1000,
+		time : 30 * 1000,
 		key  : 'OfflineReconnected'
 	}
 };
@@ -113,8 +113,8 @@ class Room extends EventEmitter
 		const audioLevelObserver = await mediasoupRouter.createAudioLevelObserver(
 			{
 				maxEntries : 999,
-				threshold  : -127,
-				interval   : 2000
+				threshold  : -50,
+				interval   : 800
 			});
 
 		const bot = await Bot.create({ mediasoupRouter });
@@ -148,6 +148,7 @@ class Room extends EventEmitter
 
 		this._virtualPeers = new Map();
 		this._timeOutTask = new Map();
+		this._tempVolume = new Map();
 
 		// Map of broadcasters indexed by id. Each Object has:
 		// - {String} id
@@ -189,9 +190,9 @@ class Room extends EventEmitter
 
 	_addTimeOutTask(peerId, taskType, call)
 	{
-		const key = `${peerId }_${taskType.key}`;
+		const key = `${peerId}_${taskType.key}`;
 		const value = this._timeOutTask.get(key);
-		
+
 		if (value)
 		{
 			clearTimeout(value);
@@ -201,28 +202,32 @@ class Room extends EventEmitter
 
 	_removeTimeOutTask(peerId, taskType)
 	{
-		const key = `${peerId }_${taskType.key}`;
+		const key = `${peerId}_${taskType.key}`;
 		const value = this._timeOutTask.get(key);
-		
+
 		if (value)
 		{
 			clearTimeout(value);
 		}
 	}
-	
-	sendNotify(type, peers, params)
+
+	sendPeerNotify(type, peer, params)
+	{
+		try
+		{
+			peer.notify(type, params);
+		}
+		catch (e)
+		{
+			logger.error('发送notify消息出错 type: %s,peer: %s, params: %s', type, peer.id, e);
+		}
+	}
+
+	sendPeersNotify(type, peers, params)
 	{
 		for (const peer of peers)
 		{
-			try
-			{
-				peer.notify(type, params);
-			}
-			catch (e)
-			{
-				logger.error('sendNotifyError type: %s,peer: %s, params: %s', type, peer.id, e);
-			}
-
+			this.sendPeerNotify(type, peer, params);
 		}
 	}
 
@@ -234,7 +239,7 @@ class Room extends EventEmitter
 		{
 			peer.data.vPeer.conversationState = ConversationState.InviteBusy;
 			this._removeTimeOutTask(peerId, TaskType.InvitationNoResponse);
-			this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
+			this.sendPeersNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
 				peerId   : peerId,
 				peerInfo : peer.data.vPeer
 			});
@@ -299,6 +304,11 @@ class Room extends EventEmitter
 		}
 	}
 
+	getPeerLogInfo(peer)
+	{
+		return `[id: ${peer.id} ${peer.data.vPeer.connectionState} ${peer.data.vPeer.conversationState}]`;
+	}
+
 	logStatus()
 	{
 		logger.info(
@@ -334,34 +344,37 @@ class Room extends EventEmitter
 			};
 			this._virtualPeers.set(peerId, vPeer);
 		}
-		
-		let peer;
 
-		if (vPeer.connectionState === ConnectionState.Offline)
+		if (vPeer.connectionState !== ConnectionState.New)
 		{
 			// 短线重连 移除掉线超时任务
 			this._removeTimeOutTask(vPeer.id, TaskType.OfflineReconnected);
 		}
-		else if (vPeer.connectionState === ConnectionState.Online)
+
+		let peer;
+		
+		// 客户端闪退的话 会及时收到close的 网络中断则不会收到 短时间重新连接上来状态还是online
+		peer = this._getPeer(peerId);
+		if (peer)
 		{
-			// 客户端闪退的话 会及时收到close的 网络中断则不会收到 短时间重新连接上来状态还是online
-			peer = this._getPeer(peerId);
+			logger.debug('用户[%s]重新上线 关闭之前的peer', peerId);
+			peer.data.vPeer.connectionState = ConnectionState.Left;
+			peer.close();
+			peer = null;
 		}
 
 		vPeer.connectionState = ConnectionState.Online;
 
 		// Create a new protoo Peer with the given peerId.
-		if (!peer)
+		try
 		{
-			try
-			{
-				peer = this._protooRoom.createPeer(peerId, protooWebSocketTransport);
-			}
-			catch (error)
-			{
-				logger.error('protooRoom.createPeer() failed:%o', error);
-				throw error;
-			}
+			logger.debug('创建新用户 %s', peerId);
+			peer = this._protooRoom.createPeer(peerId, protooWebSocketTransport);
+		}
+		catch (error)
+		{
+			logger.error('protooRoom.createPeer() failed:%o', error);
+			throw error;
 		}
 
 		// Use the peer.data object to store mediasoup related objects.
@@ -390,7 +403,7 @@ class Room extends EventEmitter
 			this._handleProtooRequest(peer, request, accept, reject)
 				.catch((error) =>
 				{
-					logger.error('request failed:%o', error);
+					logger.error('请求出错:%o', error);
 
 					reject(error);
 				});
@@ -401,25 +414,31 @@ class Room extends EventEmitter
 			if (this._closed)
 				return;
 
-			logger.debug('protoo Peer "close" event [peerId:%s]', peer.id);
+			logger.debug('用户连接断开 %s', this.getPeerLogInfo(peer));
 
 			// If the Peer was joined, notify all Peers.
 			if (peer.data.vPeer.connectionState === ConnectionState.Online)
 			{
 				// 非主动离开(left 为主动离开 hangup方法) 就视为网络断开
 				peer.data.vPeer.connectionState = ConnectionState.Offline;
-				this._addTimeOutTask(peer.id, TaskType.OfflineReconnected, () => 
+				this._addTimeOutTask(peer.id, TaskType.OfflineReconnected, () =>
 				{
+					if (this._closed)
+						return;
+					logger.debug('用户断线超时时间到 %s', this.getPeerLogInfo(peer));
 					if (peer.data.vPeer.connectionState === ConnectionState.Offline)
 					{
 						peer.data.vPeer.connectionState = ConnectionState.Left;
-						this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
+						peer.data.vPeer.conversationState = ConversationState.New;
+						logger.debug('发送用户断线超时离开消息 %s', this.getPeerLogInfo(peer));
+						this.sendPeersNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
 							peerId   : peer.id,
 							peerInfo : peer.data.vPeer
 						});
 					}
 				});
-				this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
+				logger.debug('发送用户断线消息 %s', this.getPeerLogInfo(peer));
+				this.sendPeersNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
 					peerId   : peer.id,
 					peerInfo : peer.data.vPeer
 				});
@@ -454,6 +473,14 @@ class Room extends EventEmitter
 			// 	this.close();
 			// }
 		});
+
+		const data = this._getActiveVPeers({ excludePeerId: peer.id });
+
+		if (data.length > 0)
+		{
+			this.sendPeerNotify('newPeers', peer, { peers: data });
+		}
+
 	}
 
 	getRouterRtpCapabilities()
@@ -978,41 +1005,23 @@ class Room extends EventEmitter
 	{
 		this._audioLevelObserver.on('volumes', (volumes) =>
 		{
-			const list = []
-			volumes.forEach((value)=>{
-				if (!value.producer.talking){
-					value.producer.talking = false
-				}
-				const onVoice = value.volume > -60;
-				console.log(value.producer.appData.peerId,value.producer.talking , onVoice)
-				if (value.producer.talking !== onVoice){
-					value.producer.talking = onVoice;
-					list.push({
-						peerId : value.producer.appData.peerId,
-						talking : onVoice
-					})
-				}
-			})
-			console.log(list)
-			const { producer, volume } = volumes[0];
-
-			// logger.debug(
-			// 	'audioLevelObserver "volumes" event [producerId:%s, volume:%s]',
-			// 	producer.id, volume);
-
-			// Notify all Peers.
-			for (const peer of this._getJoinedPeers())
+			const list = [];
+			
+			volumes.forEach((value) =>
 			{
-				peer.notify(
-					'activeSpeaker',
-					{
-						peerId : producer.appData.peerId,
-						volume : volume
-					})
-					.catch(() =>
-					{
-					});
-			}
+				list.push({
+					peerId : value.producer.appData.peerId,
+					volume : value.volume
+				});
+			});
+				
+			if (list.length === 0) return;
+
+			logger.debug(list);
+
+			this.sendPeersNotify('activeSpeaker', this._getOnlinePeers(), {
+				volumes : list
+			});
 		});
 
 		this._audioLevelObserver.on('silence', () =>
@@ -1022,7 +1031,7 @@ class Room extends EventEmitter
 			// Notify all Peers.
 			for (const peer of this._getJoinedPeers())
 			{
-				peer.notify('activeSpeaker', { peerId: null })
+				peer.notify('activeSpeaker', { volumes: null })
 					.catch(() =>
 					{
 					});
@@ -1040,6 +1049,11 @@ class Room extends EventEmitter
 
 		switch (request.method)
 		{
+			case 'getPeers':
+			{
+				accept(this._getActiveVPeers({ excludePeerId: peer.id }));
+				break;
+			}
 			case 'addPeers':
 			{
 				const { peers } = request.data;
@@ -1047,15 +1061,15 @@ class Room extends EventEmitter
 				const inviteList = [];
 
 				// 添加虚拟的人
-				peers.forEach((value) => 
+				peers.forEach((value) =>
 				{
 					if (!value || !value.id || value.id === peer.id)
 					{
 						return;
 					}
-						
+
 					let invitePeer = this._virtualPeers.get(value.id);
-						
+
 					if (!invitePeer)
 					{
 						invitePeer = {
@@ -1065,7 +1079,7 @@ class Room extends EventEmitter
 					}
 
 					if (invitePeer.conversationState !== ConversationState.Joined
-							&& invitePeer.conversationState !== ConversationState.Invited)
+						&& invitePeer.conversationState !== ConversationState.Invited)
 					{
 						invitePeer.id = value.id;
 						invitePeer.displayName = value.displayName;
@@ -1087,7 +1101,7 @@ class Room extends EventEmitter
 						if (value.conversationState === ConversationState.Invited)
 						{
 							value.conversationState = ConversationState.InviteTimeout;
-							this.sendNotify('peerUpdate', this._getOnlinePeers(), {
+							this.sendPeersNotify('peerUpdate', this._getOnlinePeers(), {
 								peerId   : value.id,
 								peerInfo : value
 							});
@@ -1095,7 +1109,7 @@ class Room extends EventEmitter
 					});
 				});
 
-				this.sendNotify('newPeers', this._getOnlinePeers(), {
+				this.sendPeersNotify('newPeers', this._getOnlinePeers(), {
 					peers : inviteList
 				});
 				break;
@@ -1114,6 +1128,7 @@ class Room extends EventEmitter
 				// 	peer.data.vPeer.connectionState === ConnectionState.Online &&
 				// 	peer.data.vPeer.conversationState === ConversationState.Joined)
 				// 	throw new Error('Peer already joined');
+				this._removeTimeOutTask(peer.id, TaskType.InvitationNoResponse);
 
 				const {
 					device,
@@ -1131,7 +1146,7 @@ class Room extends EventEmitter
 				// Tell the new Peer about already joined Peers.
 				// And also create Consumers for existing Producers.
 
-				const peers =this._getActiveVPeers({ excludePeerId: peer.id });
+				const peers = this._getActiveVPeers({ excludePeerId: peer.id });
 
 				accept({ peers: peers });
 
@@ -1175,7 +1190,7 @@ class Room extends EventEmitter
 					});
 
 				// Notify the new Peer to all other Peers.
-				this.sendNotify('newPeer', this._getOnlinePeers({ excludePeer: peer }), {
+				this.sendPeersNotify('newPeer', this._getOnlinePeers({ excludePeer: peer }), {
 					...peer.data.vPeer
 				});
 				break;
@@ -1183,6 +1198,8 @@ class Room extends EventEmitter
 
 			case 'hangup':
 			{
+				let sendNotify = false;
+
 				switch (peer.data.vPeer.conversationState)
 				{
 					case ConversationState.Invited:
@@ -1190,10 +1207,7 @@ class Room extends EventEmitter
 						peer.data.vPeer.connectionState = ConnectionState.Left;
 						peer.data.vPeer.conversationState = ConversationState.InviteReject;
 						this._removeTimeOutTask(peer.id, TaskType.InvitationNoResponse);
-						this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
-							peerId   : peer.id,
-							peerInfo : peer.data.vPeer
-						});
+						sendNotify = true;
 						break;
 					}
 					case ConversationState.Joined:
@@ -1201,10 +1215,7 @@ class Room extends EventEmitter
 					{
 						peer.data.vPeer.connectionState = ConnectionState.Left;
 						peer.data.vPeer.conversationState = ConversationState.Left;
-						this.sendNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
-							peerId   : peer.id,
-							peerInfo : peer.data.vPeer
-						});
+						sendNotify = true;
 						break;
 					}
 					default:
@@ -1213,6 +1224,12 @@ class Room extends EventEmitter
 					}
 				}
 				accept();
+				if (sendNotify)
+				{
+					this.sendPeersNotify('peerClosed', this._getOnlinePeers({ excludePeer: peer }), {
+						peerId : peer.id
+					});
+				}
 				break;
 			}
 			case 'createWebRtcTransport':
@@ -1374,7 +1391,12 @@ class Room extends EventEmitter
 					// 	'producer "score" event [producerId:%s, score:%o]',
 					// 	producer.id, score);
 
-					peer.notify('producerScore', { producerId: producer.id, score })
+					peer.notify('producerScore', 
+						{
+							producerId : producer.id,
+							peerId     : peer.id,
+							score 
+						})
 						.catch(() =>
 						{
 						});
@@ -1840,18 +1862,18 @@ class Room extends EventEmitter
 	{
 		const list = [];
 
-		this._virtualPeers.forEach((peer, key) => 
+		this._virtualPeers.forEach((peer, key) =>
 		{
 			if ((peer.conversationState === ConversationState.New
 				|| peer.conversationState === ConversationState.Joined
 				|| peer.conversationState === ConversationState.Invited
 				|| peer.conversationState === ConversationState.Offline
-			) && excludePeerId!==key)
+			) && excludePeerId !== key)
 			{
 				list.push(peer);
 			}
 		});
-		
+
 		return list;
 	}
 
@@ -1991,7 +2013,12 @@ class Room extends EventEmitter
 			// 	'consumer "score" event [consumerId:%s, score:%o]',
 			// 	consumer.id, score);
 
-			consumerPeer.notify('consumerScore', { consumerId: consumer.id, score })
+			consumerPeer.notify('consumerScore', 
+				{ 
+					consumerId : consumer.id,
+					peerId     : producerPeer.id,
+					score 
+				})
 				.catch(() =>
 				{
 				});
@@ -2049,6 +2076,7 @@ class Room extends EventEmitter
 				'consumerScore',
 				{
 					consumerId : consumer.id,
+					peerId     : producerPeer.id,
 					score      : consumer.score
 				})
 				.catch(() =>
