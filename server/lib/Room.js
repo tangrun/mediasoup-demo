@@ -325,7 +325,7 @@ class Room extends EventEmitter
 	 * browser.
 	 */
 	handleProtooConnection({
-		peerId, displayName, avatar, consume,
+		peerId, displayName, avatar, device, consume,
 		protooWebSocketTransport
 	})
 	{
@@ -335,15 +335,31 @@ class Room extends EventEmitter
 		if (!vPeer)
 		{
 			vPeer = {
-				id                : peerId,
-				displayName       : displayName,
-				avatar            : avatar,
-				device            : null,
+				id          : peerId,
+				displayName : displayName,
+				avatar      : avatar,
+				device      : {
+					flag    : device.flag,
+					name    : device.name,
+					version : device.version
+				},
 				connectionState   : ConnectionState.New,
 				conversationState : ConversationState.New
 			};
 			this._virtualPeers.set(peerId, vPeer);
 		}
+		else
+		{
+			if (!vPeer.displayName && displayName)
+			{
+				vPeer.displayName = displayName;
+			}
+			if (!vPeer.avatar && avatar)
+			{
+				vPeer.avatar = avatar;
+			}
+		}
+
 
 		if (vPeer.connectionState !== ConnectionState.New)
 		{
@@ -352,7 +368,7 @@ class Room extends EventEmitter
 		}
 
 		let peer;
-		
+
 		// 客户端闪退的话 会及时收到close的 网络中断则不会收到 短时间重新连接上来状态还是online
 		peer = this._getPeer(peerId);
 		if (peer)
@@ -1006,7 +1022,7 @@ class Room extends EventEmitter
 		this._audioLevelObserver.on('volumes', (volumes) =>
 		{
 			const list = [];
-			
+
 			volumes.forEach((value) =>
 			{
 				list.push({
@@ -1014,7 +1030,7 @@ class Room extends EventEmitter
 					volume : value.volume
 				});
 			});
-				
+
 			if (list.length === 0) return;
 
 			logger.debug(list);
@@ -1391,11 +1407,11 @@ class Room extends EventEmitter
 					// 	'producer "score" event [producerId:%s, score:%o]',
 					// 	producer.id, score);
 
-					peer.notify('producerScore', 
+					peer.notify('producerScore',
 						{
 							producerId : producer.id,
 							peerId     : peer.id,
-							score 
+							score
 						})
 						.catch(() =>
 						{
@@ -2013,11 +2029,11 @@ class Room extends EventEmitter
 			// 	'consumer "score" event [consumerId:%s, score:%o]',
 			// 	consumer.id, score);
 
-			consumerPeer.notify('consumerScore', 
-				{ 
+			consumerPeer.notify('consumerScore',
+				{
 					consumerId : consumer.id,
 					peerId     : producerPeer.id,
-					score 
+					score
 				})
 				.catch(() =>
 				{

@@ -155,29 +155,15 @@ async function createExpressApp()
 		{
 			const roomId = getUuid();
 
-			let room = rooms.get(roomId);
-
-			if (room)
-			{
-				res.json({
-					code : 1,
-					msg  : '房间已存在'
-				});
-			}
-			else
-			{
-				room = await createRoom(roomId);
-				res.json({
-					code	: 0,
-					msg		: 'success',
-					data	: {
-						room      	: room,
-						roomId,
-						serverIp  	: config.https.listenIp,
-						serverPort	: config.https.listenPort
-					}
-				});
-			}
+			const room = await createRoom(roomId);
+			
+			res.json({
+				code : 0,
+				msg  : 'success',
+				data : {
+					roomId
+				}
+			});
 		});
 
 	expressApp.get(
@@ -368,7 +354,8 @@ async function runProtooWebSocketServer()
 		const peerId = u.query['peerId'];
 		const displayName = u.query['displayName'];
 		const avatar = u.query['avatar'];
-		
+		const device = u.query['device'];
+
 		logger.debug('protoo connection request, address:%s, origin:%s , %s', info.socket.remoteAddress, info.origin, u.query);
 		if (!roomId || !peerId)
 		{
@@ -390,14 +377,17 @@ async function runProtooWebSocketServer()
 
 				return;
 			}
-
+			
 			// Accept the protoo WebSocket connection.
 			const protooWebSocketTransport = accept(room._getActiveVPeers());
 
-			room.handleProtooConnection({ peerId,
+			room.handleProtooConnection({
+				peerId,
 				displayName,
-				avatar, 
-				protooWebSocketTransport });
+				avatar,
+				device : JSON.parse(device),
+				protooWebSocketTransport
+			});
 		})
 			.catch((error) =>
 			{
