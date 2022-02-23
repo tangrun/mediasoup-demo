@@ -1147,7 +1147,6 @@ class Room extends EventEmitter
 				this._removeTimeOutTask(peer.id, TaskType.InvitationNoResponse);
 
 				const {
-					device,
 					rtpCapabilities,
 					sctpCapabilities
 				} = request.data;
@@ -1155,7 +1154,6 @@ class Room extends EventEmitter
 				// Store client data into the protoo Peer data object.
 				peer.data.joined = true;
 				peer.data.vPeer.conversationState = ConversationState.Joined;
-				peer.data.vPeer.device = device;
 				peer.data.rtpCapabilities = rtpCapabilities;
 				peer.data.sctpCapabilities = sctpCapabilities;
 
