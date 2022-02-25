@@ -233,16 +233,22 @@ class Room extends EventEmitter
 
 	busy(peerId) 
 	{
-		const peer = this._getPeer(peerId);
+		const peer = this.getVPeer(peerId);
 
 		if (peer) 
 		{
-			peer.data.vPeer.conversationState = ConversationState.InviteBusy;
+			peer.conversationState = ConversationState.InviteBusy;
 			this._removeTimeOutTask(peerId, TaskType.InvitationNoResponse);
 			this.sendPeersNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
 				peerId   : peerId,
-				peerInfo : peer.data.vPeer
+				peerInfo : peer
 			});
+			setTimeout(() =>
+			{
+				this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
+					peerId : peerId
+				});
+			}, 1000);
 		}
 
 	}
