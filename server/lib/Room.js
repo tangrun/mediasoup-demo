@@ -7,6 +7,8 @@ const Bot = require('./Bot');
 
 const logger = new Logger('Room');
 
+const sendClosedDelayTime = 3000;
+
 const ConnectionState = {
 	/**
 	 * 初始化
@@ -248,7 +250,7 @@ class Room extends EventEmitter
 				this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
 					peerId : peerId
 				});
-			}, 1000);
+			}, sendClosedDelayTime);
 		}
 
 	}
@@ -330,10 +332,8 @@ class Room extends EventEmitter
 	 * Called from server.js upon a protoo WebSocket connection request from a
 	 * browser.
 	 */
-	handleProtooConnection({
-							   peerId, displayName, avatar, device, consume,
-							   protooWebSocketTransport
-						   }) 
+	handleProtooConnection({ peerId, displayName, avatar,
+							   device, consume, protooWebSocketTransport })
 	{
 
 		let vPeer = this.getVPeer(peerId);
@@ -1078,30 +1078,30 @@ class Room extends EventEmitter
 				// 添加虚拟的人
 				peers.forEach((value) => 
 				{
-					if (!value || !value.id || value.id === peer.id) 
+					if (!value || !value.id || value.id === peer.id)
 					{
 						return;
 					}
 
 					let invitePeer = this._virtualPeers.get(value.id);
 
-					if (!invitePeer) 
-					{
-						invitePeer = {
-							connectionState   : ConnectionState.New,
-							conversationState : ConversationState.New
-						};
+					if (invitePeer && (invitePeer.conversationState === ConversationState.Joined
+						||invitePeer.conversationState === ConversationState.Invited))
+					{ // 新邀请的人已经在房间且在通话状态就跳过
+						return;
 					}
 
-					if (invitePeer.conversationState !== ConversationState.Joined
-						&& invitePeer.conversationState !== ConversationState.Invited) 
+					if (!invitePeer)
 					{
-						invitePeer.id = value.id;
-						invitePeer.displayName = value.displayName;
-						invitePeer.avatar = value.avatar;
-						invitePeer.conversationState = ConversationState.Invited;
-						inviteList.push(invitePeer);
+						invitePeer = {};
 					}
+					invitePeer.connectionState = ConnectionState.New;
+					invitePeer.conversationState = ConversationState.New;
+					invitePeer.id = value.id;
+					invitePeer.displayName = value.displayName;
+					invitePeer.avatar = value.avatar;
+					invitePeer.conversationState = ConversationState.Invited;
+					inviteList.push(invitePeer);
 				});
 				inviteList.forEach((value) => 
 				{
@@ -1125,7 +1125,7 @@ class Room extends EventEmitter
 								this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
 									peerId : value.id
 								});
-							}, 1000);
+							}, sendClosedDelayTime);
 						}
 					});
 				});
@@ -1249,7 +1249,7 @@ class Room extends EventEmitter
 						this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
 							peerId : peer.id
 						});
-					}, 1000);
+					}, sendClosedDelayTime);
 				}
 				break;
 			}
@@ -1864,8 +1864,9 @@ class Room extends EventEmitter
 			if ((peer.conversationState === ConversationState.New
 				|| peer.conversationState === ConversationState.Joined
 				|| peer.conversationState === ConversationState.Invited
-				|| peer.conversationState === ConversationState.Offline
-			) && excludePeerId !== key) 
+				|| peer.conversationState === ConversationState.Offline)
+				&& (peer.connectionState !== ConnectionState.Left)
+				&& excludePeerId !== key)
 			{
 				list.push(peer);
 			}
