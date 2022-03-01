@@ -58,6 +58,11 @@ const ConversationState = {
 	InviteBusy : 'InviteBusy',
 
 	/**
+	 * 离线超时
+	 */
+	OfflineTimeout : 'OfflineTimeout',
+
+	/**
 	 * 开始通话
 	 */
 	Joined : 'Joined',
@@ -449,12 +454,19 @@ class Room extends EventEmitter
 					logger.debug('用户断线超时时间到 %s', this.getPeerLogInfo(peer));
 					if (peer.data.vPeer.connectionState === ConnectionState.Offline) 
 					{
-						peer.data.vPeer.connectionState = ConnectionState.Left;
-						peer.data.vPeer.conversationState = ConversationState.New;
+						peer.data.vPeer.conversationState = ConversationState.OfflineTimeout;
 						logger.debug('发送用户断线超时离开消息 %s', this.getPeerLogInfo(peer));
-						this.sendPeersNotify('peerClosed', this._getOnlinePeers({ excludePeer: peer }), {
-							peerId : peer.id
+						// 由于peerClosed之前都有update 只有这里没有 所以加上
+						this.sendPeersNotify('peerUpdate', this._getOnlinePeers({ excludePeer: peer }), {
+							peerId   : peer.id,
+							peerInfo : peer.data.vPeer
 						});
+						setTimeout(() =>
+						{
+							this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
+								peerId : peer.id
+							});
+						}, sendClosedDelayTime);
 					}
 				});
 				logger.debug('发送用户断线消息 %s', this.getPeerLogInfo(peer));
