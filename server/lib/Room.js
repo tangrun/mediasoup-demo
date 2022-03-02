@@ -155,7 +155,7 @@ class Room extends EventEmitter
 
 		this._virtualPeers = new Map();
 		this._timeOutTask = new Map();
-		this._tempVolume = new Map();
+		this._closeFlag = 0;
 
 		// Map of broadcasters indexed by id. Each Object has:
 		// - {String} id
@@ -313,7 +313,15 @@ class Room extends EventEmitter
 
 		if (!peers || peers.length === 0) 
 		{
-			this.close();
+			if (this._closeFlag >= 3)
+			{
+				this.close();
+			}
+			else 
+			{
+				this._closeFlag ++;
+			}
+
 		}
 	}
 
