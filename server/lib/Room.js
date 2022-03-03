@@ -220,6 +220,15 @@ class Room extends EventEmitter
 
 	sendPeerNotify(type, peer, params) 
 	{
+		if (type === 'activeSpeaker') 
+		{
+			//
+		}
+		else 
+		{
+			logger.error('发送notify消息 type: %s,peer: %s, params: %s', type, peer.id, JSON.stringify(params));
+		}
+
 		try 
 		{
 			peer.notify(type, params);
@@ -250,7 +259,7 @@ class Room extends EventEmitter
 				peerId   : peerId,
 				peerInfo : peer
 			});
-			setTimeout(() =>
+			setTimeout(() => 
 			{
 				this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
 					peerId : peerId
@@ -313,13 +322,13 @@ class Room extends EventEmitter
 
 		if (!peers || peers.length === 0) 
 		{
-			if (this._closeFlag >= 3)
+			if (this._closeFlag >= 1)
 			{
 				this.close();
 			}
 			else 
 			{
-				this._closeFlag ++;
+				this._closeFlag++;
 			}
 
 		}
@@ -345,8 +354,10 @@ class Room extends EventEmitter
 	 * Called from server.js upon a protoo WebSocket connection request from a
 	 * browser.
 	 */
-	handleProtooConnection({ peerId, displayName, avatar,
-							   device, consume, protooWebSocketTransport })
+	handleProtooConnection({
+							   peerId, displayName, avatar,
+							   device, consume, protooWebSocketTransport
+						   }) 
 	{
 
 		let vPeer = this.getVPeer(peerId);
@@ -397,8 +408,6 @@ class Room extends EventEmitter
 			peer = null;
 		}
 
-		vPeer.connectionState = ConnectionState.Online;
-
 		// Create a new protoo Peer with the given peerId.
 		try 
 		{
@@ -410,6 +419,8 @@ class Room extends EventEmitter
 			logger.error('protooRoom.createPeer() failed:%o', error);
 			throw error;
 		}
+
+		vPeer.connectionState = ConnectionState.Online;
 
 		// Use the peer.data object to store mediasoup related objects.
 
@@ -469,7 +480,7 @@ class Room extends EventEmitter
 							peerId   : peer.id,
 							peerInfo : peer.data.vPeer
 						});
-						setTimeout(() =>
+						setTimeout(() => 
 						{
 							this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
 								peerId : peer.id
@@ -1098,34 +1109,33 @@ class Room extends EventEmitter
 				// 添加虚拟的人
 				peers.forEach((value) => 
 				{
-					if (!value || !value.id || value.id === peer.id)
+					if (!value || !value.id || value.id === peer.id) 
 					{
 						return;
 					}
 
-					let invitePeer = this._virtualPeers.get(value.id);
+					let invitePeer = this.getVPeer(value.id);
 
 					if (invitePeer && (invitePeer.conversationState === ConversationState.Joined
-						||invitePeer.conversationState === ConversationState.Invited))
+						|| invitePeer.conversationState === ConversationState.Invited
+						// 房主
+						|| invitePeer.conversationState === ConversationState.New
+					)) 
 					{ // 新邀请的人已经在房间且在通话状态就跳过
 						return;
 					}
 
-					if (!invitePeer)
+					if (!invitePeer) 
 					{
 						invitePeer = {};
+						this._virtualPeers.set(value.id, invitePeer);
 					}
 					invitePeer.connectionState = ConnectionState.New;
-					invitePeer.conversationState = ConversationState.New;
+					invitePeer.conversationState = ConversationState.Invited;
 					invitePeer.id = value.id;
 					invitePeer.displayName = value.displayName;
 					invitePeer.avatar = value.avatar;
-					invitePeer.conversationState = ConversationState.Invited;
 					inviteList.push(invitePeer);
-				});
-				inviteList.forEach((value) => 
-				{
-					this._virtualPeers.set(value.id, value);
 				});
 				accept();
 
@@ -1185,6 +1195,7 @@ class Room extends EventEmitter
 
 				const peers = this._getActiveVPeers({ excludePeerId: peer.id });
 
+				logger.debug('join后返回的人 peer: %s list: %s', peer.id, JSON.stringify(peers));
 				accept({ peers: peers });
 
 				// Mark the new Peer as joined.
@@ -1882,11 +1893,9 @@ class Room extends EventEmitter
 		this._virtualPeers.forEach((peer, key) => 
 		{
 			if ((peer.conversationState === ConversationState.New
-				|| peer.conversationState === ConversationState.Joined
-				|| peer.conversationState === ConversationState.Invited
-				|| peer.conversationState === ConversationState.Offline)
-				&& (peer.connectionState !== ConnectionState.Left)
-				&& excludePeerId !== key)
+					|| peer.conversationState === ConversationState.Joined
+					|| peer.conversationState === ConversationState.Invited)
+				&& excludePeerId !== key) 
 			{
 				list.push(peer);
 			}
