@@ -292,8 +292,9 @@ async function createExpressApp()
 			rooms.forEach((value, key) =>
 			{
 				roomList.push({
-					id    : key,
-					peers : Array.from(value._virtualPeers.values())
+					id         : key,
+					createTime : value._createTime,
+					peers      : Array.from(value._virtualPeers.values())
 				});
 			});
 
