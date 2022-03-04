@@ -245,6 +245,10 @@ class Room extends EventEmitter
 		{
 			this.sendPeerNotify(type, peer, params);
 		}
+		if (type === 'peerClosed') 
+		{
+			this.checkRoomClose();
+		}
 	}
 
 	busy(peerId) 
@@ -311,6 +315,14 @@ class Room extends EventEmitter
 		}
 	}
 
+	checkRoomClose() 
+	{
+		if (this._getActiveVPeers().length === 0) 
+		{
+			this.close();
+		}
+	}
+
 	getVPeer(peerId) 
 	{
 		return this._virtualPeers.get(peerId);
@@ -322,7 +334,7 @@ class Room extends EventEmitter
 
 		if (!peers || peers.length === 0) 
 		{
-			if (this._closeFlag >= 1)
+			if (this._closeFlag >= 1) 
 			{
 				this.close();
 			}
