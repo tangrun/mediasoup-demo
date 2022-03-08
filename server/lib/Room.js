@@ -381,17 +381,81 @@ class Room extends EventEmitter
 		// NOTE: Private API.
 	}
 
+	_addPeers(peer, peers)
+	{
+
+		const inviteList = [];
+
+		// 添加虚拟的人
+		peers.forEach((value) =>
+		{
+			if (!value || !value.id || value.id === peer.id)
+			{
+				return;
+			}
+
+			let invitePeer = this.getVPeer(value.id);
+
+			if (invitePeer && (invitePeer.conversationState === ConversationState.Joined
+				|| invitePeer.conversationState === ConversationState.Invited
+				// 房主
+				|| invitePeer.conversationState === ConversationState.New
+			))
+			{ // 新邀请的人已经在房间且在通话状态就跳过
+				return;
+			}
+
+			if (!invitePeer)
+			{
+				invitePeer = {};
+				this._virtualPeers.set(value.id, invitePeer);
+			}
+			invitePeer.connectionState = ConnectionState.New;
+			invitePeer.conversationState = ConversationState.Invited;
+			invitePeer.id = value.id;
+			invitePeer.displayName = value.displayName;
+			invitePeer.avatar = value.avatar;
+			inviteList.push(invitePeer);
+		});
+
+		inviteList.forEach((value) =>
+		{
+			this._addTimeOutTask(value.id, TaskType.InvitationNoResponse, () =>
+			{
+				if (value.conversationState === ConversationState.Invited)
+				{
+					value.conversationState = ConversationState.InviteTimeout;
+					this.sendPeersNotify('peerUpdate', this._getOnlinePeers(), {
+						peerId   : value.id,
+						peerInfo : value
+					});
+					setTimeout(() =>
+					{
+						this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
+							peerId : value.id
+						});
+					}, sendClosedDelayTime);
+				}
+			});
+		});
+
+		this.sendPeersNotify('newPeers', this._getOnlinePeers(), {
+			peers : inviteList
+		});
+	}
+
 	/**
 	 * Called from server.js upon a protoo WebSocket connection request from a
 	 * browser.
 	 */
 	handleProtooConnection({
 		peerId, displayName, avatar,
-		device, consume, protooWebSocketTransport
+		device, consume, peers, protooWebSocketTransport
 	})
 	{
 
 		let vPeer = this.getVPeer(peerId);
+		const needAddPeers = peers && peers.length > 0;
 
 		if (!vPeer)
 		{
@@ -452,8 +516,6 @@ class Room extends EventEmitter
 		}
 
 		vPeer.connectionState = ConnectionState.Online;
-
-		// Use the peer.data object to store mediasoup related objects.
 
 		// Not joined after a custom protoo 'join' request is later received.
 		peer.data.vPeer = vPeer;
@@ -555,6 +617,11 @@ class Room extends EventEmitter
 			// 	this.close();
 			// }
 		});
+
+		if (needAddPeers)
+		{
+			this._addPeers(peer, peers);
+		}
 
 		const data = this._getActiveVPeers({ excludePeerId: peer.id });
 
@@ -1099,9 +1166,10 @@ class Room extends EventEmitter
 
 			if (list.length === 0) return;
 
-			logger.debug(list);
-
-			this.sendPeersNotify('activeSpeaker', this._getOnlinePeers(), {
+			this.sendPeersNotify('activeSpeaker', this._getOnlinePeers().filter((value) => 
+			{
+				return value.data.vPeer.conversationState === ConversationState.Joined; 
+			}), {
 				volumes : list
 			});
 		});
@@ -1111,7 +1179,10 @@ class Room extends EventEmitter
 			logger.debug('audioLevelObserver "silence" event');
 
 			// Notify all Peers.
-			for (const peer of this._getJoinedPeers())
+			for (const peer of this._getOnlinePeers().filter((value) => 
+			{
+				return value.data.vPeer.conversationState === ConversationState.Joined;
+			}))
 			{
 				peer.notify('activeSpeaker', { volumes: null })
 					.catch(() =>
@@ -1148,69 +1219,18 @@ class Room extends EventEmitter
 				accept(this._getActiveVPeers({ excludePeerId: peer.id }));
 				break;
 			}
+			case 'getOnlinePeers':
+			{ // 获取在线的人
+				accept(this._getOnlinePeers({ excludePeer: peer }));
+				break;
+			}
 			case 'addPeers':
 			{
 				const { peers } = request.data;
 
-				const inviteList = [];
-
-				// 添加虚拟的人
-				peers.forEach((value) =>
-				{
-					if (!value || !value.id || value.id === peer.id)
-					{
-						return;
-					}
-
-					let invitePeer = this.getVPeer(value.id);
-
-					if (invitePeer && (invitePeer.conversationState === ConversationState.Joined
-						|| invitePeer.conversationState === ConversationState.Invited
-						// 房主
-						|| invitePeer.conversationState === ConversationState.New
-					))
-					{ // 新邀请的人已经在房间且在通话状态就跳过
-						return;
-					}
-
-					if (!invitePeer)
-					{
-						invitePeer = {};
-						this._virtualPeers.set(value.id, invitePeer);
-					}
-					invitePeer.connectionState = ConnectionState.New;
-					invitePeer.conversationState = ConversationState.Invited;
-					invitePeer.id = value.id;
-					invitePeer.displayName = value.displayName;
-					invitePeer.avatar = value.avatar;
-					inviteList.push(invitePeer);
-				});
 				accept();
 
-				inviteList.forEach((value) =>
-				{
-					this._addTimeOutTask(value.id, TaskType.InvitationNoResponse, () =>
-					{
-						if (value.conversationState === ConversationState.Invited)
-						{
-							value.conversationState = ConversationState.InviteTimeout;
-							this.sendPeersNotify('peerUpdate', this._getOnlinePeers(), {
-								peerId   : value.id,
-								peerInfo : value
-							});
-							setTimeout(() =>
-							{
-								this.sendPeersNotify('peerClosed', this._getOnlinePeers(), {
-									peerId : value.id
-								});
-							}, sendClosedDelayTime);
-						}
-					});
-				});
-
-				this.sendPeersNotify('newPeers', this._getOnlinePeers(), {
-					peers : inviteList
-				});
+				this._addPeers(peer, peers);
 				break;
 			}
 			case 'getRouterRtpCapabilities':

@@ -356,6 +356,7 @@ async function runProtooWebSocketServer()
 		const displayName = u.query['displayName'];
 		const avatar = u.query['avatar'];
 		const device = u.query['device'];
+		const peers = u.query['peers'];
 
 		logger.debug('protoo connection request, address:%s, origin:%s , %s', info.socket.remoteAddress, info.origin, u.query);
 		if (!roomId || !peerId)
@@ -387,6 +388,7 @@ async function runProtooWebSocketServer()
 				displayName,
 				avatar,
 				device : JSON.parse(device),
+				peers  : peers ?JSON.parse(peers):null,
 				protooWebSocketTransport
 			});
 		})
