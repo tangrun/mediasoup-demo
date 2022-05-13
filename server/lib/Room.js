@@ -1166,9 +1166,9 @@ class Room extends EventEmitter
 
 			if (list.length === 0) return;
 
-			this.sendPeersNotify('activeSpeaker', this._getOnlinePeers().filter((value) => 
+			this.sendPeersNotify('activeSpeaker', this._getOnlinePeers().filter((value) =>
 			{
-				return value.data.vPeer.conversationState === ConversationState.Joined; 
+				return value.data.vPeer.conversationState === ConversationState.Joined;
 			}), {
 				volumes : list
 			});
@@ -1179,7 +1179,7 @@ class Room extends EventEmitter
 			logger.debug('audioLevelObserver "silence" event');
 
 			// Notify all Peers.
-			for (const peer of this._getOnlinePeers().filter((value) => 
+			for (const peer of this._getOnlinePeers().filter((value) =>
 			{
 				return value.data.vPeer.conversationState === ConversationState.Joined;
 			}))
@@ -1994,6 +1994,10 @@ class Room extends EventEmitter
 					|| peer.conversationState === ConversationState.Invited)
 				&& excludePeerId !== key)
 			{
+				if (peer.connectionState === ConnectionState.Left)
+				{
+					return;
+				}
 				list.push(peer);
 			}
 		});
